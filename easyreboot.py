@@ -5,6 +5,7 @@ import threading
 import subprocess
 import keyboard
 import msvcrt
+import requests
 from tqdm import tqdm
 from colorama import Fore, Style, init
 
@@ -33,8 +34,8 @@ apps = [
     {"id": 12, "name": "HeidiSQL", "cmd": "winget install HeidiSQL.HeidiSQL", "selected": False},
     {"id": 13, "name": "Burp Suite Community Edition", "cmd": "winget install PortSwigger.BurpSuite.Community", "selected": False},
     {"id": 14, "name": "AnyDesk", "cmd": "winget install AnyDesk.AnyDesk", "selected": False},
+    {"id": 15, "name": "fGs WINACTIVE", "cmd": f'powershell -ExecutionPolicy Bypass -Command "irm https://get.activated.win | iex"', "selected": False},
 ]
-
 # ======== FUNÇÕES ========
 def clear():
     os.system("cls" if os.name == "nt" else "clear")
@@ -60,7 +61,6 @@ def print_menu():
         # alinhar colunas
         id_width = 2
         name_width = 30
-        status_width = 12
 
         for i, app in enumerate(apps):
             status = Fore.GREEN + "SELECTED" if app["selected"] else Fore.RED + "UNSELECTED"
@@ -112,11 +112,27 @@ def handle_key(key):
 def run_installation(cmd):
     finished = [False]
     def run_cmd():
-        proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for _ in proc.stdout:
-            pass
-        proc.wait()
+        if cmd.startswith("http"):  # Caso seja link direto
+            file_name = cmd.split("/")[-1]
+            print(Fore.GREEN + "[+]" + Style.RESET_ALL + f" Downloading {file_name}...")
+            try:
+                res = requests.get(cmd, stream=True)
+                res.raise_for_status()
+                with open(file_name, "wb") as f:
+                    for chunk in res.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                print(Fore.GREEN + "[+]" + Style.RESET_ALL + f"Sucessfully Downloaded! Executing {file_name}...")
+                os.system(f'"{file_name}"')
+            except requests.exceptions.RequestException as e:
+                print(Fore.RED + "[-]" + Style.RESET_ALL + f" Download Failed: {e}")
+        else:  # Caso normal (winget, etc.)
+            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for _ in proc.stdout:
+                pass
+            proc.wait()
         finished[0] = True
+
     threading.Thread(target=run_cmd, daemon=True).start()
     return finished
 
@@ -124,6 +140,7 @@ def install_apps():
     with menu_lock:  # bloquear input enquanto instala
         clear()
         selected = [app for app in apps if app["selected"]]
+        
         if not selected:
             print(Fore.YELLOW + "No apps selected for installation." + Style.RESET_ALL)
             time.sleep(2)
@@ -132,7 +149,11 @@ def install_apps():
         print("Installing selected apps...\n")
         for app in selected:
             print(f"> Installing {app['name']}...")
+            
+            # Instalação: se for link, faz download, senão usa winget
             finished = run_installation(app["cmd"])
+
+            # Barra de progresso
             with tqdm(total=100, desc=f"Installing {app['name']}", unit="%", ncols=80) as bar:
                 current = 0
                 step = 1
@@ -142,10 +163,13 @@ def install_apps():
                         bar.update(step)
                         current += step
                     time.sleep(0.05)
+
                 if current < 100:
                     bar.update(100 - current)
+
             print(Fore.GREEN + f"{app['name']} installed successfully!\n" + Style.RESET_ALL)
             time.sleep(0.5)
+
         print(Fore.GREEN + "All installations completed!" + Style.RESET_ALL)
         input("\nPress ENTER to return to the menu...")
 
